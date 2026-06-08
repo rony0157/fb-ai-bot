@@ -1,11 +1,10 @@
 import os
 import json
+import re
 import requests
 from flask import Flask, request, jsonify
 from anthropic import Anthropic
 from datetime import datetime
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 app = Flask(__name__, static_folder=".")
 
@@ -14,79 +13,61 @@ PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "")
-GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
+APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-def get_gsheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_dict = json.loads(GOOGLE_CREDENTIALS)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    gc = gspread.authorize(creds)
-    return gc.open_by_key(GOOGLE_SHEET_ID)
-
-def get_products():
-    try:
-        sheet = get_gsheet().worksheet("Products")
-        rows = sheet.get_all_records()
-        product_text = "আমাদের Products:\n"
-        for row in rows:
-            if str(row.get("Stock", "")).lower() == "yes":
-                product_text += f"- {row['Product Name']}: {row['Price']} টাকা — {row['Description']}\n"
-        return product_text
-    except Exception as e:
-        print(f"Sheet error: {e}")
-        return "Products list পাওয়া যাচ্ছে না।"
-
 def save_order(name, phone, product, quantity, address):
     try:
-        sheet = get_gsheet().worksheet("Orders")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        sheet.append_row([now, name, phone, product, quantity, address])
+        data = {"name": name, "phone": phone, "product": product, "quantity": quantity, "address": address}
+        response = requests.post(APPS_SCRIPT_URL, json=data)
+        print(f"✅ Order saved: {response.text}")
         return True
     except Exception as e:
-        print(f"Order save error: {e}")
+        print(f"❌ Order save error: {e}")
         return False
 
 def send_telegram(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"})
+        print("✅ Telegram sent!")
     except Exception as e:
-        print(f"Telegram error: {e}")
+        print(f"❌ Telegram error: {e}")
 
 def get_ai_reply(user_message):
     try:
-        products = get_products()
-        system_prompt = f"""আপনি OnePoint Easy Fashion এর customer service assistant।
+        system_prompt = """আপনি OnePoint Easy Fashion এর customer service assistant।
 
-{products}
+আমাদের Products:
+- শাড়ি: 500 টাকা — সুন্দর কটন শাড়ি
+- থ্রিপিস: 800 টাকা — এক্সক্লুসিভ থ্রিপিস
+- কুর্তি: 350 টাকা — ট্রেন্ডি কুর্তি
 
 আপনার কাজ:
-1. Customer দের products সম্পর্কে জানানো
-2. Order নেওয়া — Order নিতে হলে এই তথ্য জানুন:
+1. Products সম্পর্কে জানানো
+2. Order নেওয়া — এই তথ্য জানুন:
    - নাম
    - ফোন নম্বর
    - কোন product চান
    - কত পিস চান
    - ঠিকানা
-3. সব তথ্য পেলে confirm করুন এবং "[ORDER_COMPLETE]" লিখুন এরপর JSON:
-   {{"name": "নাম", "phone": "ফোন", "product": "product", "quantity": "পরিমাণ", "address": "ঠিকানা"}}
+3. সব তথ্য পেলে বলুন: "আপনার অর্ডার confirm করছি:" এবং সব তথ্য repeat করুন, তারপর লিখুন [ORDER_COMPLETE] এবং JSON:
+{"name": "নাম", "phone": "ফোন", "product": "product", "quantity": "পরিমাণ", "address": "ঠিকানা"}
 
 বাংলায় কথা বলুন। বন্ধুত্বপূর্ণ থাকুন।"""
 
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+            max_tokens=600,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}]
         )
         reply = response.content[0].text
+        print(f"🤖 AI reply: {reply[:100]}")
 
         if "[ORDER_COMPLETE]" in reply:
-            import re
-            json_match = re.search(r'\{.*?\}', reply, re.DOTALL)
+            json_match = re.search(r'\{[^}]+\}', reply)
             if json_match:
                 order_data = json.loads(json_match.group())
                 save_order(
@@ -110,7 +91,7 @@ def get_ai_reply(user_message):
 
         return reply
     except Exception as e:
-        print(f"AI error: {e}")
+        print(f"❌ AI error: {e}")
         return "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না।"
 
 @app.route("/webhook", methods=["GET"])
