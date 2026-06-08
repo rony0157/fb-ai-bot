@@ -127,7 +127,11 @@ def get_ai_reply(sender_id, user_message):
         if discount_percent and float(str(discount_percent)) > 0:
             discount_text = f"🎊 বিশেষ অফার: {discount_percent}% ছাড়! {discount_message}"
 
-        system_prompt = f"""আপনি {business_name} এর customer service assistant।
+        system_prompt = f"""আপনি {business_name} এর customer service assistant। গুরুত্বপূর্ণ নিয়ম:
+- প্রতিটা reply তে সালাম দেবে না। শুধু প্রথম message এ একবার সালাম দাও।
+- সরাসরি কাজের কথা বলো।
+- অপ্রয়োজনীয় কথা কম বলো।
+        
 
 {product_text}
 
