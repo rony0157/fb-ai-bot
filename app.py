@@ -17,6 +17,9 @@ APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
+# প্রতিটা user এর conversation history রাখব
+conversations = {}
+
 def save_order(name, phone, product, quantity, address):
     try:
         data = {"name": name, "phone": phone, "product": product, "quantity": quantity, "address": address}
@@ -35,8 +38,19 @@ def send_telegram(message):
     except Exception as e:
         print(f"❌ Telegram error: {e}")
 
-def get_ai_reply(user_message):
+def get_ai_reply(sender_id, user_message):
     try:
+        # User এর conversation history নিন
+        if sender_id not in conversations:
+            conversations[sender_id] = []
+        
+        # নতুন message যোগ করুন
+        conversations[sender_id].append({"role": "user", "content": user_message})
+        
+        # শেষ ১০টা message রাখুন
+        if len(conversations[sender_id]) > 10:
+            conversations[sender_id] = conversations[sender_id][-10:]
+
         system_prompt = """আপনি OnePoint Easy Fashion এর customer service assistant।
 
 আমাদের Products:
@@ -46,13 +60,13 @@ def get_ai_reply(user_message):
 
 আপনার কাজ:
 1. Products সম্পর্কে জানানো
-2. Order নেওয়া — এই তথ্য জানুন:
+2. Order নেওয়া — ধাপে ধাপে এই তথ্য জানুন:
    - নাম
    - ফোন নম্বর
    - কোন product চান
    - কত পিস চান
    - ঠিকানা
-3. সব তথ্য পেলে বলুন: "আপনার অর্ডার confirm করছি:" এবং সব তথ্য repeat করুন, তারপর লিখুন [ORDER_COMPLETE] এবং JSON:
+3. সব তথ্য পেলে confirm করুন এবং [ORDER_COMPLETE] লিখুন, তারপর JSON:
 {"name": "নাম", "phone": "ফোন", "product": "product", "quantity": "পরিমাণ", "address": "ঠিকানা"}
 
 বাংলায় কথা বলুন। বন্ধুত্বপূর্ণ থাকুন।"""
@@ -61,10 +75,13 @@ def get_ai_reply(user_message):
             model="claude-haiku-4-5-20251001",
             max_tokens=600,
             system=system_prompt,
-            messages=[{"role": "user", "content": user_message}]
+            messages=conversations[sender_id]
         )
         reply = response.content[0].text
         print(f"🤖 AI reply: {reply[:100]}")
+
+        # AI reply history তে যোগ করুন
+        conversations[sender_id].append({"role": "assistant", "content": reply})
 
         if "[ORDER_COMPLETE]" in reply:
             json_match = re.search(r'\{[^}]+\}', reply)
@@ -85,6 +102,8 @@ def get_ai_reply(user_message):
 📍 ঠিকানা: {order_data.get('address', '')}
 🕐 সময়: {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
                 send_telegram(telegram_msg)
+                # Order হলে conversation reset করুন
+                conversations[sender_id] = []
 
             reply = reply.split("[ORDER_COMPLETE]")[0].strip()
             reply += "\n\n✅ আপনার অর্ডার নেওয়া হয়েছে! আমরা শীঘ্রই যোগাযোগ করব।"
@@ -113,7 +132,7 @@ def handle_message():
                 if "message" in event and "text" in event["message"]:
                     user_message = event["message"]["text"]
                     print(f"📩 Message: {user_message}")
-                    ai_reply = get_ai_reply(user_message)
+                    ai_reply = get_ai_reply(sender_id, user_message)
                     send_message(sender_id, ai_reply)
     return jsonify({"status": "ok"}), 200
 
