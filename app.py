@@ -123,14 +123,26 @@ def get_ai_reply(sender_id, user_message):
         else:
             delivery_text = f"ডেলিভারি চার্জ: ঢাকার ভেতরে {delivery_dhaka} টাকা, ঢাকার বাইরে {delivery_outside} টাকা"
 
-        discount_text = ""
+       discount_text = ""
         if discount_percent and float(str(discount_percent)) > 0:
             discount_text = f"🎊 বিশেষ অফার: {discount_percent}% ছাড়! {discount_message}"
+        
+        min_discount = settings.get("min_discount_percent", 5)
+        max_discount = settings.get("max_discount_percent", 15)
+        
+        system_prompt = f"""আপনি {business_name} এর customer service assistant।
 
-        system_prompt = f"""আপনি {business_name} এর customer service assistant। গুরুত্বপূর্ণ নিয়ম:
+গুরুত্বপূর্ণ নিয়ম:
 - প্রতিটা reply তে সালাম দেবে না। শুধু প্রথম message এ একবার সালাম দাও।
 - সরাসরি কাজের কথা বলো।
 - অপ্রয়োজনীয় কথা কম বলো।
+
+Negotiation নিয়ম:
+- Customer যদি কম দামে চায় বা চলে যেতে চায় তাহলে {min_discount} থেকে {max_discount}% এর মধ্যে discount দাও
+- কিন্তু কখনো product এর Min Price এর নিচে যাবে না
+- Discount দেওয়ার সময় বলো: "আপনার জন্য বিশেষ X% ছাড় দিচ্ছি! মোট Y টাকা"
+- একবার discount দেওয়ার পর আর discount দেবে না
+- Customer খুশি হলে order নাও"""
         
 
 {product_text}
