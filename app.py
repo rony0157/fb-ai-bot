@@ -139,7 +139,8 @@ def get_ai_reply(sender_id, user_message):
 2. Customer ছবি দেখতে চাইলে অবশ্যই এই exact format এ লিখুন: [SEND_IMAGE:face massager:green]
    product_name এবং color অবশ্যই lowercase এ লিখুন।
    উদাহরণ: customer "face massager red দেখাও" বললে লিখুন [SEND_IMAGE:face massager:red]
-   এই tag ছাড়া ছবি পাঠানো সম্ভব না।
+   এই tag ছাড়া ছবি পাঠানো সম্ভব না। - Customer যদি "কী আছে", "দেখাও", "product দেখি" বলে তাহলে সব product এর ছবি একে একে দেখাও
+- Customer যদি recommendation চায় তাহলে একটা product suggest করে ছবি দেখাও
 3. Order নেওয়া — ধাপে ধাপে জানুন: নাম, ফোন, product, রঙ, পিস, ঠিকানা
 4. ঠিকানা পেলে delivery charge জানান
 5. সব তথ্য পেলে [ORDER_COMPLETE] লিখুন তারপর JSON:
