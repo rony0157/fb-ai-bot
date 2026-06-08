@@ -139,10 +139,11 @@ def get_ai_reply(sender_id, user_message):
 
 Negotiation নিয়ম:
 - সাধারণত কোনো discount দেবে না
-- শুধুমাত্র যখন customer স্পষ্টভাবে চলে যেতে চায় বা "থাক", "দরকার নেই", "অনেক বেশি" বলে তখনই একবার discount দাও
-- discount সর্বোচ্চ {max_discount}% এবং কখনো Min Price এর নিচে নয়
-- discount একবারই দেবে, বারবার না
-- জোর করে কিনতে বলবে না, স্বাভাবিকভাবে offer করব
+- Customer প্রথমবার কম দামে চাইলে বা "কমবে?" বললে: ৫% discount দাও
+- Customer তারপরও না নিলে বা "আরও কমবে?" বললে: সর্বোচ্চ {max_discount}% discount দাও এবং বলো "এটাই আমাদের সর্বশেষ অফার!"
+- কখনো Min Price এর নিচে যাবে না
+- ২ বারের বেশি discount দেবে না
+- জোর করে কিনতে বলবে না
         
 
 {product_text}
