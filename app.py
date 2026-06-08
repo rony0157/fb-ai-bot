@@ -14,13 +14,14 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "")
+SHEET_ID = "1qxl48jTnCDp4gXjzPdvTcVgZg1864sQ7pwq_DLlkF6s"
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 conversations = {}
 
-def get_products_from_sheet():
+def get_sheet_data(sheet_name):
     try:
-        url = f"https://docs.google.com/spreadsheets/d/1qxl48jTnCDp4gXjzPdvTcVgZg1864sQ7pwq_DLlkF6s/gviz/tq?tqx=out:json&sheet=Products"
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:json&sheet={sheet_name}"
         response = requests.get(url)
         text = response.text
         json_str = re.search(r'google\.visualization\.Query\.setResponse\((.*)\)', text, re.DOTALL)
@@ -29,22 +30,40 @@ def get_products_from_sheet():
         data = json.loads(json_str.group(1))
         rows = data['table']['rows']
         cols = [c['label'] for c in data['table']['cols']]
-        products = []
+        result = []
         for row in rows:
             if row['c'][0] and row['c'][0]['v']:
-                product = {}
+                item = {}
                 for i, col in enumerate(cols):
-                    product[col] = row['c'][i]['v'] if row['c'][i] and row['c'][i]['v'] else ""
-                products.append(product)
-        return products
+                    item[col] = row['c'][i]['v'] if row['c'][i] and row['c'][i]['v'] else ""
+                result.append(item)
+        return result
     except Exception as e:
         print(f"Sheet error: {e}")
         return []
 
-def save_order(name, phone, product, color, quantity, address):
+def get_settings():
     try:
-        data = {"name": name, "phone": phone, "product": product, "color": color, "quantity": quantity, "address": address}
-        requests.post(APPS_SCRIPT_URL, json=data)
+        rows = get_sheet_data("Settings")
+        settings = {}
+        for row in rows:
+            key = list(row.values())[0]
+            value = list(row.values())[1] if len(row.values()) > 1 else ""
+            settings[key] = value
+        return settings
+    except:
+        return {}
+
+def get_products():
+    try:
+        products = get_sheet_data("Products")
+        return [p for p in products if str(p.get("Stock", "")).lower() == "yes"]
+    except:
+        return []
+
+def save_order(order_data):
+    try:
+        requests.post(APPS_SCRIPT_URL, json=order_data)
         return True
     except Exception as e:
         print(f"Order save error: {e}")
@@ -85,22 +104,42 @@ def get_ai_reply(sender_id, user_message):
         if len(conversations[sender_id]) > 10:
             conversations[sender_id] = conversations[sender_id][-10:]
 
-        products = get_products_from_sheet()
+        products = get_products()
+        settings = get_settings()
+
+        business_name = settings.get("business_name", "OnePoint")
+        delivery_dhaka = settings.get("delivery_dhaka", 80)
+        delivery_outside = settings.get("delivery_outside", 120)
+        free_delivery = str(settings.get("free_delivery", "no")).lower()
+        discount_percent = settings.get("discount_percent", 0)
+        discount_message = settings.get("discount_message", "")
+
         product_text = "আমাদের Products:\n"
         for p in products:
-            if str(p.get("Stock", "")).lower() == "yes":
-                product_text += f"- {p.get('Product Name','')} ({p.get('Color','')}) : {p.get('Price','')} টাকা — {p.get('Description','')}\n"
+            product_text += f"- {p.get('Product Name','')} ({p.get('Color','')}) : {p.get('Price','')} টাকা — {p.get('Description','')}\n"
 
-        system_prompt = f"""আপনি OnePoint Easy Fashion এর customer service assistant।
+        if free_delivery == "yes":
+            delivery_text = "ডেলিভারি: সম্পূর্ণ বিনামূল্যে! 🎉"
+        else:
+            delivery_text = f"ডেলিভারি চার্জ: ঢাকার ভেতরে {delivery_dhaka} টাকা, ঢাকার বাইরে {delivery_outside} টাকা"
+
+        discount_text = ""
+        if discount_percent and float(str(discount_percent)) > 0:
+            discount_text = f"🎊 বিশেষ অফার: {discount_percent}% ছাড়! {discount_message}"
+
+        system_prompt = f"""আপনি {business_name} এর customer service assistant।
 
 {product_text}
 
+{delivery_text}
+{discount_text}
+
 আপনার কাজ:
-1. Products সম্পর্কে জানানো
+1. Products সম্পর্কে জানানো ও ছবি দেখানো
 2. Customer ছবি দেখতে চাইলে [SEND_IMAGE:product_name:color] লিখুন
-   যেমন: [SEND_IMAGE:face massager:red]
 3. Order নেওয়া — ধাপে ধাপে জানুন: নাম, ফোন, product, রঙ, পিস, ঠিকানা
-4. সব তথ্য পেলে [ORDER_COMPLETE] লিখুন তারপর JSON:
+4. ঠিকানা পেলে delivery charge জানান
+5. সব তথ্য পেলে [ORDER_COMPLETE] লিখুন তারপর JSON:
 {{"name":"নাম","phone":"ফোন","product":"product","color":"রঙ","quantity":"পিস","address":"ঠিকানা"}}
 
 বাংলায় কথা বলুন। বন্ধুত্বপূর্ণ থাকুন।"""
@@ -128,14 +167,7 @@ def get_ai_reply(sender_id, user_message):
             json_match = re.search(r'\{[^}]+\}', reply)
             if json_match:
                 order_data = json.loads(json_match.group())
-                save_order(
-                    order_data.get("name",""),
-                    order_data.get("phone",""),
-                    order_data.get("product",""),
-                    order_data.get("color",""),
-                    order_data.get("quantity",""),
-                    order_data.get("address","")
-                )
+                save_order(order_data)
                 telegram_msg = f"""🛍️ <b>নতুন Order!</b>
 👤 নাম: {order_data.get('name','')}
 📞 ফোন: {order_data.get('phone','')}
