@@ -16,58 +16,92 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "")
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
-
-# প্রতিটা user এর conversation history রাখব
 conversations = {}
 
-def save_order(name, phone, product, quantity, address):
+def get_products_from_sheet():
     try:
-        data = {"name": name, "phone": phone, "product": product, "quantity": quantity, "address": address}
-        response = requests.post(APPS_SCRIPT_URL, json=data)
-        print(f"✅ Order saved: {response.text}")
+        url = f"https://docs.google.com/spreadsheets/d/1qxl48jTnCDp4gXjzPdvTcVgZg1864sQ7pwq_DLlkF6s/gviz/tq?tqx=out:json&sheet=Products"
+        response = requests.get(url)
+        text = response.text
+        json_str = re.search(r'google\.visualization\.Query\.setResponse\((.*)\)', text, re.DOTALL)
+        if not json_str:
+            return []
+        data = json.loads(json_str.group(1))
+        rows = data['table']['rows']
+        cols = [c['label'] for c in data['table']['cols']]
+        products = []
+        for row in rows:
+            if row['c'][0] and row['c'][0]['v']:
+                product = {}
+                for i, col in enumerate(cols):
+                    product[col] = row['c'][i]['v'] if row['c'][i] and row['c'][i]['v'] else ""
+                products.append(product)
+        return products
+    except Exception as e:
+        print(f"Sheet error: {e}")
+        return []
+
+def save_order(name, phone, product, color, quantity, address):
+    try:
+        data = {"name": name, "phone": phone, "product": product, "color": color, "quantity": quantity, "address": address}
+        requests.post(APPS_SCRIPT_URL, json=data)
         return True
     except Exception as e:
-        print(f"❌ Order save error: {e}")
+        print(f"Order save error: {e}")
         return False
 
 def send_telegram(message):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"})
-        print("✅ Telegram sent!")
     except Exception as e:
-        print(f"❌ Telegram error: {e}")
+        print(f"Telegram error: {e}")
+
+def send_message(recipient_id, message_text):
+    url = "https://graph.facebook.com/v18.0/me/messages"
+    params = {"access_token": PAGE_ACCESS_TOKEN}
+    data = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
+    requests.post(url, params=params, json=data)
+
+def send_image(recipient_id, image_url):
+    try:
+        url = "https://graph.facebook.com/v18.0/me/messages"
+        params = {"access_token": PAGE_ACCESS_TOKEN}
+        data = {
+            "recipient": {"id": recipient_id},
+            "message": {"attachment": {"type": "image", "payload": {"url": image_url, "is_reusable": True}}}
+        }
+        requests.post(url, params=params, json=data)
+    except Exception as e:
+        print(f"Image send error: {e}")
 
 def get_ai_reply(sender_id, user_message):
     try:
-        # User এর conversation history নিন
         if sender_id not in conversations:
             conversations[sender_id] = []
-        
-        # নতুন message যোগ করুন
+
         conversations[sender_id].append({"role": "user", "content": user_message})
-        
-        # শেষ ১০টা message রাখুন
+
         if len(conversations[sender_id]) > 10:
             conversations[sender_id] = conversations[sender_id][-10:]
 
-        system_prompt = """আপনি OnePoint Easy Fashion এর customer service assistant।
+        products = get_products_from_sheet()
+        product_text = "আমাদের Products:\n"
+        for p in products:
+            if str(p.get("Stock", "")).lower() == "yes":
+                product_text += f"- {p.get('Product Name','')} ({p.get('Color','')}) : {p.get('Price','')} টাকা — {p.get('Description','')}\n"
 
-আমাদের Products:
-- শাড়ি: 500 টাকা — সুন্দর কটন শাড়ি
-- থ্রিপিস: 800 টাকা — এক্সক্লুসিভ থ্রিপিস
-- কুর্তি: 350 টাকা — ট্রেন্ডি কুর্তি
+        system_prompt = f"""আপনি OnePoint Easy Fashion এর customer service assistant।
+
+{product_text}
 
 আপনার কাজ:
 1. Products সম্পর্কে জানানো
-2. Order নেওয়া — ধাপে ধাপে এই তথ্য জানুন:
-   - নাম
-   - ফোন নম্বর
-   - কোন product চান
-   - কত পিস চান
-   - ঠিকানা
-3. সব তথ্য পেলে confirm করুন এবং [ORDER_COMPLETE] লিখুন, তারপর JSON:
-{"name": "নাম", "phone": "ফোন", "product": "product", "quantity": "পরিমাণ", "address": "ঠিকানা"}
+2. Customer ছবি দেখতে চাইলে [SEND_IMAGE:product_name:color] লিখুন
+   যেমন: [SEND_IMAGE:face massager:red]
+3. Order নেওয়া — ধাপে ধাপে জানুন: নাম, ফোন, product, রঙ, পিস, ঠিকানা
+4. সব তথ্য পেলে [ORDER_COMPLETE] লিখুন তারপর JSON:
+{{"name":"নাম","phone":"ফোন","product":"product","color":"রঙ","quantity":"পিস","address":"ঠিকানা"}}
 
 বাংলায় কথা বলুন। বন্ধুত্বপূর্ণ থাকুন।"""
 
@@ -78,31 +112,38 @@ def get_ai_reply(sender_id, user_message):
             messages=conversations[sender_id]
         )
         reply = response.content[0].text
-        print(f"🤖 AI reply: {reply[:100]}")
-
-        # AI reply history তে যোগ করুন
         conversations[sender_id].append({"role": "assistant", "content": reply})
 
+        # ছবি পাঠানো
+        image_matches = re.findall(r'\[SEND_IMAGE:([^:]+):([^\]]+)\]', reply)
+        for product_name, color in image_matches:
+            for p in products:
+                if p.get('Product Name','').lower() == product_name.strip().lower() and p.get('Color','').lower() == color.strip().lower():
+                    if p.get('Image URL'):
+                        send_image(sender_id, p['Image URL'])
+            reply = reply.replace(f'[SEND_IMAGE:{product_name}:{color}]', '').strip()
+
+        # Order complete
         if "[ORDER_COMPLETE]" in reply:
             json_match = re.search(r'\{[^}]+\}', reply)
             if json_match:
                 order_data = json.loads(json_match.group())
                 save_order(
-                    order_data.get("name", ""),
-                    order_data.get("phone", ""),
-                    order_data.get("product", ""),
-                    order_data.get("quantity", ""),
-                    order_data.get("address", "")
+                    order_data.get("name",""),
+                    order_data.get("phone",""),
+                    order_data.get("product",""),
+                    order_data.get("color",""),
+                    order_data.get("quantity",""),
+                    order_data.get("address","")
                 )
                 telegram_msg = f"""🛍️ <b>নতুন Order!</b>
-👤 নাম: {order_data.get('name', '')}
-📞 ফোন: {order_data.get('phone', '')}
-🛒 Product: {order_data.get('product', '')}
-🔢 পরিমাণ: {order_data.get('quantity', '')}
-📍 ঠিকানা: {order_data.get('address', '')}
+👤 নাম: {order_data.get('name','')}
+📞 ফোন: {order_data.get('phone','')}
+🛒 Product: {order_data.get('product','')} ({order_data.get('color','')})
+🔢 পরিমাণ: {order_data.get('quantity','')}
+📍 ঠিকানা: {order_data.get('address','')}
 🕐 সময়: {datetime.now().strftime('%Y-%m-%d %H:%M')}"""
                 send_telegram(telegram_msg)
-                # Order হলে conversation reset করুন
                 conversations[sender_id] = []
 
             reply = reply.split("[ORDER_COMPLETE]")[0].strip()
@@ -110,7 +151,7 @@ def get_ai_reply(sender_id, user_message):
 
         return reply
     except Exception as e:
-        print(f"❌ AI error: {e}")
+        print(f"AI error: {e}")
         return "দুঃখিত, এই মুহূর্তে উত্তর দিতে পারছি না।"
 
 @app.route("/webhook", methods=["GET"])
@@ -135,12 +176,6 @@ def handle_message():
                     ai_reply = get_ai_reply(sender_id, user_message)
                     send_message(sender_id, ai_reply)
     return jsonify({"status": "ok"}), 200
-
-def send_message(recipient_id, message_text):
-    url = "https://graph.facebook.com/v18.0/me/messages"
-    params = {"access_token": PAGE_ACCESS_TOKEN}
-    data = {"recipient": {"id": recipient_id}, "message": {"text": message_text}}
-    requests.post(url, params=params, json=data)
 
 @app.route("/privacy")
 def privacy():
