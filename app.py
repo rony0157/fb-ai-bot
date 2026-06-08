@@ -138,11 +138,11 @@ def get_ai_reply(sender_id, user_message):
 - অপ্রয়োজনীয় কথা কম বলো।
 
 Negotiation নিয়ম:
-- Customer যদি কম দামে চায় বা চলে যেতে চায় তাহলে {min_discount} থেকে {max_discount}% এর মধ্যে discount দাও
-- কিন্তু কখনো product এর Min Price এর নিচে যাবে না
-- Discount দেওয়ার সময় বলো: "আপনার জন্য বিশেষ X% ছাড় দিচ্ছি! মোট Y টাকা"
-- একবার discount দেওয়ার পর আর discount দেবে না
-- Customer খুশি হলে order নাও"""
+- সাধারণত কোনো discount দেবে না
+- শুধুমাত্র যখন customer স্পষ্টভাবে চলে যেতে চায় বা "থাক", "দরকার নেই", "অনেক বেশি" বলে তখনই একবার discount দাও
+- discount সর্বোচ্চ {max_discount}% এবং কখনো Min Price এর নিচে নয়
+- discount একবারই দেবে, বারবার না
+- জোর করে কিনতে বলবে না, স্বাভাবিকভাবে offer করব
         
 
 {product_text}
