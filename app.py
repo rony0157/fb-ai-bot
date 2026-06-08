@@ -47,8 +47,9 @@ def get_settings():
         rows = get_sheet_data("Settings")
         settings = {}
         for row in rows:
-            key = list(row.values())[0]
-            value = list(row.values())[1] if len(row.values()) > 1 else ""
+            vals = list(row.values())
+            key = vals[0]
+            value = vals[1] if len(vals) > 1 else ""
             settings[key] = value
         return settings
     except:
@@ -113,23 +114,24 @@ def get_ai_reply(sender_id, user_message):
         free_delivery = str(settings.get("free_delivery", "no")).lower()
         discount_percent = settings.get("discount_percent", 0)
         discount_message = settings.get("discount_message", "")
+        min_discount = settings.get("min_discount_percent", 5)
+        max_discount = settings.get("max_discount_percent", 10)
+        return_policy = settings.get("return_policy", "ডেলিভারি ম্যানের সামনে product চেক করে নিন।")
+        cancel_policy = settings.get("cancel_policy", "ডেলিভারি চার্জ দিয়ে ফেরত দিতে পারবেন।")
 
         product_text = "আমাদের Products:\n"
         for p in products:
-            product_text += f"- {p.get('Product Name','')} ({p.get('Color','')}) : {p.get('Price','')} টাকা — {p.get('Description','')}\n"
+            product_text += f"- {p.get('Product Name','')} ({p.get('Color','')}) : {p.get('Price','')} টাকা (সর্বনিম্ন: {p.get('Min Price','')} টাকা) — {p.get('Description','')}\n"
 
         if free_delivery == "yes":
-            delivery_text = "ডেলিভারি: সম্পূর্ণ বিনামূল্যে! 🎉"
+            delivery_text = "ডেলিভারি: সম্পূর্ণ বিনামূল্যে!"
         else:
             delivery_text = f"ডেলিভারি চার্জ: ঢাকার ভেতরে {delivery_dhaka} টাকা, ঢাকার বাইরে {delivery_outside} টাকা"
 
-       discount_text = ""
+        discount_text = ""
         if discount_percent and float(str(discount_percent)) > 0:
-            discount_text = f"🎊 বিশেষ অফার: {discount_percent}% ছাড়! {discount_message}"
-        
-        min_discount = settings.get("min_discount_percent", 5)
-        max_discount = settings.get("max_discount_percent", 15)
-        
+            discount_text = f"বিশেষ অফার: {discount_percent}% ছাড়! {discount_message}"
+
         system_prompt = f"""আপনি {business_name} এর customer service assistant।
 
 গুরুত্বপূর্ণ নিয়ম:
@@ -139,12 +141,14 @@ def get_ai_reply(sender_id, user_message):
 
 Negotiation নিয়ম:
 - সাধারণত কোনো discount দেবে না
-- Customer প্রথমবার কম দামে চাইলে বা "কমবে?" বললে: ৫% discount দাও
+- Customer প্রথমবার কম দামে চাইলে বা "কমবে?" বললে: {min_discount}% discount দাও
 - Customer তারপরও না নিলে বা "আরও কমবে?" বললে: সর্বোচ্চ {max_discount}% discount দাও এবং বলো "এটাই আমাদের সর্বশেষ অফার!"
 - কখনো Min Price এর নিচে যাবে না
 - ২ বারের বেশি discount দেবে না
 - জোর করে কিনতে বলবে না
-        
+
+Return Policy: {return_policy}
+Cancel Policy: {cancel_policy}
 
 {product_text}
 
@@ -153,11 +157,8 @@ Negotiation নিয়ম:
 
 আপনার কাজ:
 1. Products সম্পর্কে জানানো ও ছবি দেখানো
-2. Customer ছবি দেখতে চাইলে অবশ্যই এই exact format এ লিখুন: [SEND_IMAGE:face massager:green]
-   product_name এবং color অবশ্যই lowercase এ লিখুন।
-   উদাহরণ: customer "face massager red দেখাও" বললে লিখুন [SEND_IMAGE:face massager:red]
-   এই tag ছাড়া ছবি পাঠানো সম্ভব না। - Customer যদি "কী আছে", "দেখাও", "product দেখি" বলে তাহলে সব product এর ছবি একে একে দেখাও
-- Customer যদি recommendation চায় তাহলে একটা product suggest করে ছবি দেখাও
+2. Customer ছবি দেখতে চাইলে অবশ্যই এই exact format এ লিখুন: [SEND_IMAGE:product_name:color]
+   উদাহরণ: [SEND_IMAGE:face massager:red]
 3. Order নেওয়া — ধাপে ধাপে জানুন: নাম, ফোন, product, রঙ, পিস, ঠিকানা
 4. ঠিকানা পেলে delivery charge জানান
 5. সব তথ্য পেলে [ORDER_COMPLETE] লিখুন তারপর JSON:
@@ -174,7 +175,6 @@ Negotiation নিয়ম:
         reply = response.content[0].text
         conversations[sender_id].append({"role": "assistant", "content": reply})
 
-        # ছবি পাঠানো
         image_matches = re.findall(r'\[SEND_IMAGE:([^:]+):([^\]]+)\]', reply)
         for product_name, color in image_matches:
             for p in products:
@@ -183,7 +183,6 @@ Negotiation নিয়ম:
                         send_image(sender_id, p['Image URL'])
             reply = reply.replace(f'[SEND_IMAGE:{product_name}:{color}]', '').strip()
 
-        # Order complete
         if "[ORDER_COMPLETE]" in reply:
             json_match = re.search(r'\{[^}]+\}', reply)
             if json_match:
